@@ -1232,9 +1232,12 @@ extern "C" void APIENTRY glBindTexture(GLenum target, GLuint texture)
 		gl.GetIntegerv(GL_ACTIVE_TEXTURE, &texunit);
 		texunit -= GL_TEXTURE0;
 
-		// Could technically get current sampler via "GL_SAMPLER_BINDING", but that only works if sampler objects are used and bound before the texture, which is not necessarily the case
+		// This only works if sampler objects are used and bound before the texture, which is not necessarily the case
+		GLint sampler = 0;
+		gl.GetIntegeri_v(GL_SAMPLER_BINDING, texunit, &sampler);
+
 		reshade::api::sampler_with_resource_view descriptor_data = {
-			reshade::api::sampler { 0 },
+			reshade::api::sampler { static_cast<uint64_t>(sampler) },
 			reshade::opengl::make_resource_view_handle(target, texture)
 		};
 
@@ -3612,7 +3615,11 @@ void APIENTRY glBindTextures(GLuint first, GLsizei count, const GLuint *textures
 					gl.GetTextureParameteriv(textures[i], GL_TEXTURE_TARGET, &target);
 
 				descriptor_data[i].view = reshade::opengl::make_resource_view_handle(target, textures[i]);
-				descriptor_data[i].sampler = { 0 };
+
+				GLint sampler = 0;
+				gl.GetIntegeri_v(GL_SAMPLER_BINDING, i, &sampler);
+
+				descriptor_data[i].sampler = { static_cast<uint64_t>(sampler) };
 			}
 		}
 		else
@@ -4238,8 +4245,11 @@ void APIENTRY glBindTextureUnit(GLuint unit, GLuint texture)
 		GLint target = GL_TEXTURE;
 		gl.GetTextureParameteriv(texture, GL_TEXTURE_TARGET, &target);
 
+		GLint sampler = 0;
+		gl.GetIntegeri_v(GL_SAMPLER_BINDING, unit, &sampler);
+
 		reshade::api::sampler_with_resource_view descriptor_data = {
-			reshade::api::sampler { 0 },
+			reshade::api::sampler { static_cast<uint64_t>(sampler) },
 			reshade::opengl::make_resource_view_handle(target, texture)
 		};
 
@@ -4345,8 +4355,11 @@ void APIENTRY glBindMultiTextureEXT(GLenum texunit, GLenum target, GLuint textur
 		assert(texunit >= GL_TEXTURE0);
 		texunit -= GL_TEXTURE0;
 
+		GLint sampler = 0;
+		gl.GetIntegeri_v(GL_SAMPLER_BINDING, texunit, &sampler);
+
 		reshade::api::sampler_with_resource_view descriptor_data = {
-			reshade::api::sampler { 0 },
+			reshade::api::sampler { static_cast<uint64_t>(sampler) },
 			reshade::opengl::make_resource_view_handle(target, texture)
 		};
 
