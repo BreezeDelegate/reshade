@@ -1453,9 +1453,31 @@ HRESULT STDMETHODCALLTYPE Direct3DDevice9::SetTexture(DWORD Stage, IDirect3DBase
 			Stage -= D3DVERTEXTEXTURESAMPLER0;
 		}
 
+		DWORD sampler_state[11] = {};
+		for (D3DSAMPLERSTATETYPE state = D3DSAMP_ADDRESSU; state <= D3DSAMP_MAXANISOTROPY; state = static_cast<D3DSAMPLERSTATETYPE>(state + 1))
+			_orig->GetSamplerState(Stage, state, &sampler_state[state]);
+
+		reshade::api::sampler sampler = { 0 };
+		if (const auto it = std::find_if(_samplers.begin(), _samplers.end(),
+				[&sampler_state](const reshade::api::sampler &sampler_candidate) {
+					return std::memcmp(reinterpret_cast<reshade::d3d9::sampler_impl *>(sampler_candidate.handle)->state, sampler_state, sizeof(sampler_state)) == 0;
+				});
+			it != _samplers.end())
+		{
+			sampler = *it;
+		}
+		else
+		{
+			const auto desc = reshade::d3d9::convert_sampler_desc(sampler_state);
+			if (create_sampler(desc, &sampler))
+				_samplers.push_back(sampler);
+
+			reshade::invoke_addon_event<reshade::addon_event::init_sampler>(this, desc, sampler);
+		}
+
 		// There are no sampler state objects in D3D9, so cannot deduce a handle to one here meaningfully
 		reshade::api::sampler_with_resource_view descriptor_data = {
-			reshade::api::sampler { 0 },
+			sampler,
 			reshade::api::resource_view { reinterpret_cast<uintptr_t>(pTexture) }
 		};
 
@@ -2523,6 +2545,13 @@ void Direct3DDevice9::on_init()
 void Direct3DDevice9::on_reset()
 {
 #if RESHADE_ADDON >= 2
+	for (const reshade::api::sampler sampler : _samplers)
+	{
+		reshade::invoke_addon_event<reshade::addon_event::destroy_sampler>(this, sampler);
+		destroy_sampler(sampler);
+	}
+	_samplers.clear();
+
 	resize_primitive_up_buffers(0, 0);
 #endif
 

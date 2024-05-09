@@ -185,5 +185,6 @@ struct DECLSPEC_UUID("F1006E9A-1C51-4AF4-ACEF-3605D2D4C8EE") Direct3DDevice9 fin
 #if RESHADE_ADDON >= 2
 	UINT _primitive_up_vertex_buffer_size = 0;
 	UINT _primitive_up_index_buffer_size = 0;
+	std::vector<reshade::api::sampler> _samplers;
 #endif
 };
