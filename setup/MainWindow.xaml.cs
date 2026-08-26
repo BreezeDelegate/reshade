@@ -136,6 +136,7 @@ namespace ReShade.Setup
 				if (File.Exists(args[i]))
 				{
 					currentInfo.targetPath = args[i];
+					currentInfo.selectedPath = currentInfo.targetPath;
 					currentInfo.targetName = Path.GetFileNameWithoutExtension(currentInfo.targetPath);
 				}
 			}
@@ -195,8 +196,8 @@ namespace ReShade.Setup
 			public bool is64Bit;
 			public Api targetApi;
 			public bool targetOpenXR;
-			public string targetPath, targetName;
-			public string modulePath, configPath, presetPath;
+			public string selectedPath, targetPath, targetName;
+			public string modulePath, configPath, presetPath, alternateConfigPath;
 		}
 
 		InstallInfo currentInfo = new InstallInfo();
@@ -615,11 +616,83 @@ namespace ReShade.Setup
 			}
 		}
 
+		string FindKnownCompatibilityTarget(string selectedPath)
+		{
+			if (compatibilityIni == null || string.IsNullOrEmpty(selectedPath) ||
+				compatibilityIni.HasValue(Path.GetFileName(selectedPath), "RenderApi"))
+			{
+				return null;
+			}
+
+			string selectedDirectory = Path.GetDirectoryName(selectedPath);
+			if (string.IsNullOrEmpty(selectedDirectory))
+			{
+				return null;
+			}
+
+			string candidate = null;
+			try
+			{
+				foreach (string candidatePath in Directory.EnumerateFiles(selectedDirectory, "*.exe", SearchOption.AllDirectories))
+				{
+					string candidateName = Path.GetFileName(candidatePath);
+					if (!compatibilityIni.HasValue(candidateName, "RenderApi") || compatibilityIni.GetString(candidateName, "Banned") == "1")
+					{
+						continue;
+					}
+
+					// Only suggest a replacement when there is a single unambiguous known target.
+					if (candidate != null && !candidate.Equals(candidatePath, StringComparison.OrdinalIgnoreCase))
+					{
+						return null;
+					}
+
+					candidate = candidatePath;
+				}
+			}
+			catch (SystemException)
+			{
+				// Ignore inaccessible directories and continue with the executable selected by the user.
+				return null;
+			}
+
+			return candidate;
+		}
+
 		void InstallStep_AnalyzeExecutable()
 		{
 			DownloadCompatibilityIni();
 
 			UpdateStatus("Analyzing executable ...");
+
+			if (string.IsNullOrEmpty(currentInfo.selectedPath))
+			{
+				currentInfo.selectedPath = currentInfo.targetPath;
+			}
+
+			if (!isHeadless)
+			{
+				string knownTargetPath = FindKnownCompatibilityTarget(currentInfo.targetPath);
+				if (!string.IsNullOrEmpty(knownTargetPath) && !knownTargetPath.Equals(currentInfo.targetPath, StringComparison.OrdinalIgnoreCase))
+				{
+					bool useKnownTarget = false;
+					Dispatcher.Invoke(() =>
+					{
+						useKnownTarget = MessageBox.Show(this,
+							"ReShade found another executable in the selected application directory with known compatibility information. " +
+							"It may be the executable that actually renders the game.\n\n" +
+							"Selected executable:\n" + currentInfo.targetPath + "\n\n" +
+							"Known executable:\n" + knownTargetPath + "\n\n" +
+							"Use the known executable instead?",
+							"Executable selection", MessageBoxButton.YesNo, MessageBoxImage.Information) == MessageBoxResult.Yes;
+					});
+
+					if (useKnownTarget)
+					{
+						currentInfo.targetPath = knownTargetPath;
+					}
+				}
+			}
 
 			// In case this is the bootstrap executable of an Unreal Engine game, try and find the actual game executable for it
 			string targetPathUnrealEngine = PEInfo.ReadResourceString(currentInfo.targetPath, 201); // IDI_EXEC_FILE (see BootstrapPackagedGame.cpp in Unreal Engine source code)
@@ -866,6 +939,14 @@ namespace ReShade.Setup
 			}
 
 			currentInfo.configPath = Path.Combine(basePath, "ReShade.ini");
+			currentInfo.alternateConfigPath = null;
+
+			string selectedBasePath = string.IsNullOrEmpty(currentInfo.selectedPath) ? null : Path.GetDirectoryName(currentInfo.selectedPath);
+			string targetBasePath = Path.GetDirectoryName(currentInfo.targetPath);
+			if (!string.IsNullOrEmpty(selectedBasePath) && !selectedBasePath.Equals(targetBasePath, StringComparison.OrdinalIgnoreCase) && File.Exists(Path.Combine(selectedBasePath, "ReShade.ini")))
+			{
+				currentInfo.alternateConfigPath = Path.Combine(selectedBasePath, "ReShade.ini");
+			}
 
 			if (currentInfo.targetApi == Api.Vulkan || currentInfo.targetOpenXR)
 			{
@@ -1803,7 +1884,21 @@ In that event here are some steps you can try to resolve this:
 		{
 			if (currentOperation != InstallOperation.Uninstall)
 			{
-				UpdateStatusAndFinish(true, "Successfully installed ReShade." +
+				string installationDetails = string.Empty;
+				if (!isHeadless && !string.IsNullOrEmpty(currentInfo.configPath))
+				{
+					installationDetails = "\n\nTarget executable:\n" + currentInfo.targetPath +
+						"\n\nConfiguration file:\n" + currentInfo.configPath;
+
+					if (!string.IsNullOrEmpty(currentInfo.alternateConfigPath))
+					{
+						installationDetails += "\n\nAnother ReShade configuration was found next to the originally selected executable:\n" +
+							currentInfo.alternateConfigPath +
+							"\nThis is a separate installation and is not used by the target above.";
+					}
+				}
+
+				UpdateStatusAndFinish(true, "Successfully installed ReShade." + installationDetails +
 					(isHeadless ? string.Empty : "\nClick the \"Finish\" button to exit the setup tool.\n\nTo uninstall, run this setup tool and select the application again to be presented with an uninstall option."));
 			}
 			else
@@ -1825,6 +1920,7 @@ In that event here are some steps you can try to resolve this:
 				appPage.Cancel();
 
 				currentInfo.targetPath = appPage.FileName;
+				currentInfo.selectedPath = currentInfo.targetPath;
 
 				if (!isElevated && !IsWritable(Path.GetDirectoryName(currentInfo.targetPath)))
 				{
